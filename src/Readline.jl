@@ -21,10 +21,12 @@ module Readline
         complete::CompletionProvider
         enter_cb::Function
         input_buffer::IOBuffer
-        prompt
+        prompt::ASCIIString
+        prompt_color::ASCIIString
+        input_color::ASCIIString
         num_rows::Int
         curs_row::Int
-        indent
+        indent::Int
     end
 
     completeLine(c::EmptyCompletionProvider,s) = []
@@ -83,7 +85,7 @@ module Readline
         buf_pos = position(s.input_buffer)
         line_pos = buf_pos
         # Write out the prompt string
-        write(s.terminal,s.prompt)
+        write_prompt(s)
 
         seek(s.input_buffer,0)
 
@@ -327,11 +329,21 @@ module Readline
     default_completion_cb(::IOBuffer) = []
     default_enter_cb(::IOBuffer) = true
 
-    function prompt!(terminal,prompt;complete=EmptyCompletionProvider(),on_enter=default_enter_cb,hist=EmptyHistoryProvider())
-        s = ReadlineState(terminal,hist,complete,on_enter,IOBuffer(),prompt,1,1,length(prompt))
+    function write_prompt(s)
+        write(s.terminal,s.prompt_color)
+        write(s.terminal,s.prompt)
+        write(s.terminal,s.input_color)
+    end
+
+    function prompt!(terminal,prompt;
+                    prompt_color="",
+                    input_color="",
+                    complete=EmptyCompletionProvider(),
+                    on_enter=default_enter_cb,hist=EmptyHistoryProvider())
+        s = ReadlineState(terminal,hist,complete,on_enter,IOBuffer(),prompt,prompt_color,input_color,1,1,length(prompt))
         raw!(terminal,true)
         try
-            write(s.terminal,prompt)
+            write_prompt(s)
             while true
                 c=read(terminal,Char)
 
