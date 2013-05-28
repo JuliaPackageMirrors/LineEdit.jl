@@ -194,7 +194,7 @@ module Readline
         end
     end
 
-    const non_word_chars = " \t\n\"\\'`@\$><=;|&{}()[].,+-*/?%^~!"
+    const non_word_chars = " \t\n\"\\'`@\$><=:;|&{}()[].,+-*/?%^~"
 
     function char_move_word_right(s)
         while !eof(s.input_buffer) && !contains(non_word_chars,read(s.input_buffer,Char))
@@ -289,26 +289,34 @@ module Readline
         end
     end
 
+    function replace_line(s,l::IOBuffer)
+        s.input_buffer = l
+    end
+
     function replace_line(s,l)
-        truncate(s.input_buffer,0)
+        s.input_buffer.ptr = 1
+        s.input_buffer.size = 0
         write(s.input_buffer,l)
     end
 
     history_prev(::EmptyHistoryProvider) = ("",false)
     history_next(::EmptyHistoryProvider) = ("",false)
+    add_history(::EmptyHistoryProvider,s) = nothing
 
     function history_prev(s) 
-        (l,ok) = history_prev(s.hist)
+        (l,ok) = history_prev(s.hist,s)
         if ok
             replace_line(s,l)
+            refresh_line(s)
         else
             beep(s.terminal)
         end
     end
     function history_next(s) 
-        (l,ok) = history_next(s.hist)
+        (l,ok) = history_next(s.hist,s)
         if ok
             replace_line(s,l)
+            refresh_line(s)
         else
             beep(s.terminal)
         end
@@ -334,7 +342,8 @@ module Readline
                 elseif c == '\r'
                     if s.enter_cb(s)
                         println(s.terminal)
-                        return s.input_buffer
+                        add_history(s.hist,s)
+                        return (s.input_buffer,true)
                     else
                         edit_insert(s,'\n')
                         refresh_line(s)
@@ -346,7 +355,7 @@ module Readline
                         edit_delete(s)
                     else
                         println(s.terminal)
-                        return s.input_buffer
+                        return (s.input_buffer,false)
                     end
                 elseif c == 2 #^B
                     edit_move_left(s)
