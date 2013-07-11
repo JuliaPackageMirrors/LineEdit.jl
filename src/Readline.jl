@@ -586,14 +586,14 @@ module Readline
     end
 
     macro keymap(func, keymaps)
-        dict = keymap_unify(keymap_prepare(eval(keymaps)))
+        dict = keymap_unify(keymap_prepare(isa(keymaps,Expr)?eval(keymaps):keymaps))
         body = keymap_gen_body(dict,dict)
-        quote
-            function $(esc(func))(s::ReadlineState,data)
+        esc(quote
+            function $(func)(s::Readline.ReadlineState,data)
                 $body
                 return :ok
             end
-        end
+        end)
     end
 
     const escape_defaults = {
@@ -641,18 +641,18 @@ module Readline
     end
 
     const search_keymap = {
-        "^R" => :( history_set_backward(s,data,true); history_next_result(s,data) ),
-        "^S" => :( history_set_backward(s,data,false); history_next_result(s,data) ),
+        "^R" => :( Readline.history_set_backward(s,data,true); Readline.history_next_result(s,data) ),
+        "^S" => :( Readline.history_set_backward(s,data,false); Readline.history_next_result(s,data) ),
         "\r" => :( s.input_buffer = data.respose_buffer; return :done ),
         "\t" => nothing, #TODO: Maybe allow tab completion in R-Search?
 
         # Backspace/^H
-        '\b' => :(edit_backspace(data.query_buffer)?update_display_buffer(s,data):beep(s.terminal)),
+        '\b' => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(s.terminal)),
         127 => '\b',
         "^C" => :( return :abort ),
         "^D" => :( return :abort ),
 
-        "*" => :(edit_insert(data.query_buffer,c1);update_display_buffer(s,data))
+        "*" => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
     }
     @Readline.keymap search_keymap_func [Readline.search_keymap,Readline.escape_defaults]
 
@@ -692,10 +692,10 @@ module Readline
         '\r' => quote
             if s.enter_cb(s)
                 println(s.terminal)
-                add_history(s.hist,s)
+                Readline.add_history(s.hist,s)
                 return :done
             else
-                edit_insert(s,'\n')
+                Readline.edit_insert(s,'\n')
             end
         end,
         # Backspace/^H
@@ -704,7 +704,7 @@ module Readline
         # ^D
         4 => quote 
             if s.input_buffer.size > 0
-                edit_delete(s)
+                Readline.edit_delete(s)
             else
                 println(s.terminal)
                 return :abort
@@ -727,19 +727,19 @@ module Readline
         # Left Arrow
         "\e[D" => edit_move_left,
         # Meta Enter
-        "\e\r" => :(edit_insert(s,'\n')),
+        "\e\r" => :(Readline.edit_insert(s,'\n')),
         # Simply insert it into the buffer by default
-        "*" => :(edit_insert(s,c1)),
+        "*" => :( Readline.edit_insert(s,c1) ),
         # ^U
-        21 => :( truncate(s.input_buffer,0); refresh_line(s) ),
+        21 => :( truncate(s.input_buffer,0); Readline.refresh_line(s) ),
         # ^K
         11 => :( truncate(s.input_buffer,position(s.input_buffer)) ),
         # ^A    
-        1 => :( seek(s.input_buffer,0); refresh_line(s) ),
+        1 => :( seek(s.input_buffer,0); Readline.refresh_line(s) ),
         # ^E
-        5 => :( seek(s.input_buffer,s.input_buffer.size-1);refresh_line(s) ),
+        5 => :( seek(s.input_buffer,s.input_buffer.size-1);Readline.refresh_line(s) ),
         # ^L
-        12 => :( clear(s.terminal); refresh_line(s) ),
+        12 => :( clear(s.terminal); Readline.refresh_line(s) ),
         # ^W (#edit_delte_prev_word(s))
         23 => :( error("Unimplemented") ),
         # ^R
