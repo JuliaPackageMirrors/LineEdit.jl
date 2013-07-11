@@ -747,10 +747,12 @@ module Readline
         "^S" => enter_ssearch
     }
 
+    @Readline.keymap default_keymap_func [Readline.default_keymap,Readline.escape_defaults]
+
     function prompt!(terminal,prompt;
                     first_prompt = prompt,
                     prompt_color="",
-                    keymap_func = handmande_default,
+                    keymap_func = default_keymap_func,
                     keymap_func_data = nothing,
                     input_color="",
                     complete=EmptyCompletionProvider(),
