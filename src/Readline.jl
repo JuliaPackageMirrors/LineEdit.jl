@@ -366,6 +366,7 @@ module Readline
 
     history_prev(::EmptyHistoryProvider) = ("",false)
     history_next(::EmptyHistoryProvider) = ("",false)
+    history_search(::EmptyHistoryProvider,args...) = false
     add_history(::EmptyHistoryProvider,s) = nothing
 
     function history_prev(s) 
@@ -609,34 +610,76 @@ module Readline
         "\e[6**" => nothing
     }
 
+    function write_response_buffer(s,data)
+        offset = s.input_buffer.ptr
+        ptr = data.respose_buffer.ptr
+        seek(data.respose_buffer,0)
+        write(s.input_buffer,readall(data.respose_buffer))
+        s.input_buffer.ptr = offset+ptr-2
+        data.respose_buffer.ptr = ptr
+        refresh_line(s)
+    end
+
     function update_display_buffer(s,data)
         truncate(s.input_buffer,0)
         write(s.input_buffer,pointer(data.query_buffer.data),data.query_buffer.ptr-1)
         write(s.input_buffer,"': ")
-        refresh_line(s)
+        history_search(data.s.hist,data.s,data.query_buffer,data.respose_buffer,data.backward,false) || beep(s.terminal)
+        write_response_buffer(s,data)
+
     end
 
-    const rsearch_keymap = {
-        "^R" => nothing, #history_next_result,
-        "\r" => :( return :abort ),
+    function history_next_result(s,data)
+        truncate(s.input_buffer,s.input_buffer.size - data.respose_buffer.size)
+        history_search(data.s.hist,data.s,data.query_buffer,data.respose_buffer,data.backward,true) || beep(s.terminal)
+        write_response_buffer(s,data)
+    end
+
+    function history_set_backward(s,data,backward)
+        data.backward = backward
+        s.prompt = backward ? "(reverse-i-search)`" : "(i-search)`"
+    end
+
+    const search_keymap = {
+        "^R" => :( history_set_backward(s,data,true); history_next_result(s,data) ),
+        "^S" => :( history_set_backward(s,data,false); history_next_result(s,data) ),
+        "\r" => :( s.input_buffer = data.respose_buffer; return :done ),
+        "\t" => nothing, #TODO: Maybe allow tab completion in R-Search?
 
         # Backspace/^H
         '\b' => :(edit_backspace(data.query_buffer)?update_display_buffer(s,data):beep(s.terminal)),
         127 => '\b',
+        "^C" => :( return :abort ),
+        "^D" => :( return :abort ),
 
         "*" => :(edit_insert(data.query_buffer,c1);update_display_buffer(s,data))
     }
-    @Readline.keymap rsearch_keymap_func [Readline.rsearch_keymap,Readline.escape_defaults]
+    @Readline.keymap search_keymap_func [Readline.search_keymap,Readline.escape_defaults]
 
 
-    type RSearchState
+    type SearchState
         s::ReadlineState
+        backward::Bool #rsearch or ssearch
         query_buffer::IOBuffer
+        respose_buffer::IOBuffer
     end
 
     function enter_rsearch(s)
-        prompt!(s.terminal,"(reverse-i-search)`";first_prompt = "(reverse-i-search)`': ",
-            keymap_func=rsearch_keymap_func,keymap_func_data=RSearchState(s,IOBuffer()))
+        (buf,ok) = prompt!(s.terminal,"(reverse-i-search)`";first_prompt = "(reverse-i-search)`': ",
+            keymap_func=search_keymap_func,keymap_func_data=SearchState(s,true,IOBuffer(),IOBuffer()))
+        if ok
+            s.input_buffer = buf
+        end
+        raw!(s.terminal,true)
+        refresh_line(s)
+    end
+
+    function enter_ssearch(s)
+        (ok,buf) = prompt!(s.terminal,"(i-search)`";first_prompt = "(i-search)`': ",
+            keymap_func=search_keymap_func,keymap_func_data=SearchState(s,false,IOBuffer(),IOBuffer()))
+        if ok
+            s.input_buffer = buf
+        end
         raw!(s.terminal,true)
         refresh_line(s)
     end
@@ -700,7 +743,8 @@ module Readline
         # ^W (#edit_delte_prev_word(s))
         23 => :( error("Unimplemented") ),
         # ^R
-        "^R" => enter_rsearch
+        "^R" => enter_rsearch,
+        "^S" => enter_ssearch
     }
 
     function prompt!(terminal,prompt;
