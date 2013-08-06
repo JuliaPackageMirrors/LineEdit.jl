@@ -57,7 +57,7 @@ module Readline
         elseif length(completions) == 1
             # Replace word by completion
             prev_pos = position(s.input_buffer)
-            char_move_word_left(s)
+            seek(s.input_buffer,prev_pos-sizeof(partial))
             edit_replace(s,position(s.input_buffer),prev_pos,completions[1])
         else
             p = common_prefix(completions)
@@ -65,7 +65,7 @@ module Readline
                 # All possible completions share the same prefix, so we might as
                 # well complete that
                 prev_pos = position(s.input_buffer)
-                char_move_word_left(s)
+                seek(s.input_buffer,prev_pos-sizeof(partial))
                 edit_replace(s,position(s.input_buffer),prev_pos,p)
             else
                 # Show available completions
@@ -675,7 +675,7 @@ module Readline
     end
 
     function enter_ssearch(s)
-        (ok,buf) = prompt!(s.terminal,"(i-search)`";first_prompt = "(i-search)`': ",
+        (buf,ok) = prompt!(s.terminal,"(i-search)`";first_prompt = "(i-search)`': ",
             keymap_func=search_keymap_func,keymap_func_data=SearchState(s,false,IOBuffer(),IOBuffer()))
         if ok
             s.input_buffer = buf
@@ -687,7 +687,7 @@ module Readline
     const default_keymap =
     {   
         # Tab
-        '\t' => :(completeLine(s); refresh_line(s)),
+        '\t' => :(Readline.completeLine(s); Readline.refresh_line(s)),
         # Enter
         '\r' => quote
             if s.enter_cb(s)
