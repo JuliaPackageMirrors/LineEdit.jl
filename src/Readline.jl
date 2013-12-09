@@ -6,6 +6,53 @@ module Readline
 
     import Base: ensureroom, peek
 
+    abstract TextInterface 
+
+    export run_interface, Prompt, ModalInterface, transition, reset_state, edit_insert
+
+    immutable ModalInterface <: TextInterface
+        modes
+    end
+
+    type MIState
+        interface::ModalInterface
+        current_mode
+        aborted::Bool
+        mode_state
+    end
+
+    type Mode <: TextInterface
+
+    end
+
+    type Prompt <: TextInterface
+        prompt
+        first_prompt
+        prompt_color::ASCIIString
+        keymap_func
+        keymap_func_data
+        input_color
+        complete
+        on_enter
+        on_done
+        hist
+    end
+
+    immutable InputAreaState
+        num_rows::Int64
+        curs_row::Int64
+    end
+
+    type PromptState
+        terminal::TextTerminal
+        p::Prompt
+        input_buffer::IOBuffer
+        ias::InputAreaState
+        indent::Int
+    end
+
+    input_string(s::PromptState) = bytestring(pointer(s.input_buffer.data),s.input_buffer.ptr-1)
+
     abstract HistoryProvider
     abstract CompletionProvider
 
@@ -15,21 +62,18 @@ module Readline
     type EmptyHistoryProvider <: HistoryProvider
     end
 
-    type ReadlineState
-        terminal::TextTerminal
-        hist::HistoryProvider
-        complete::CompletionProvider
-        enter_cb::Function
-        input_buffer::IOBuffer
-        prompt::ASCIIString
-        prompt_color::ASCIIString
-        input_color::ASCIIString
-        num_rows::Int
-        curs_row::Int
-        indent::Int
-    end
+    reset_state(::EmptyHistoryProvider) = nothing
 
     completeLine(c::EmptyCompletionProvider,s) = []
+
+    terminal(s::IO) = s
+    terminal(s::PromptState) = s.terminal
+
+    for f in [:terminal,:edit_insert,:on_enter,:add_history,:buffer,:edit_backspace,:(Base.isempty),
+            :replace_line,:refreshMultiLine,:input_string,:completeLine,:edit_move_left,:edit_move_right,
+            :update_display_buffer]
+        @eval ($f)(s::MIState,args...) = $(f)(s.mode_state[s.current_mode],args...)
+    end
 
     function common_prefix(completions)
         ret = ""
@@ -50,10 +94,10 @@ module Readline
         end
     end
 
-    function completeLine(s::ReadlineState)
-        (completions,partial) = completeLine(s.complete,s)
+    function completeLine(s::PromptState)
+        (completions,partial) = completeLine(s.p.complete,s)
         if length(completions) == 0
-            beep(s.terminal)
+            beep(Readline.terminal(s))
         elseif length(completions) == 1
             # Replace word by completion
             prev_pos = position(s.input_buffer)
@@ -69,54 +113,65 @@ module Readline
                 edit_replace(s,position(s.input_buffer),prev_pos,p)
             else
                 # Show available completions
-                colmax = max(map(length,completions))
-                num_cols = div(width(s.terminal),colmax+2)
+                colmax = maximum(map(length,completions))
+                num_cols = div(width(Readline.terminal(s)),colmax+2)
                 entries_per_col = div(length(completions),num_cols)+1
-                println(s.terminal)
+                println(Readline.terminal(s))
                 for row = 1:entries_per_col
                     for col = 0:num_cols
                         idx = row + col*entries_per_col
                         if idx <= length(completions)
-                            cmove_col(s.terminal,(colmax+2)*col)
-                            print(s.terminal,completions[idx])
+                            cmove_col(Readline.terminal(s),(colmax+2)*col)
+                            print(Readline.terminal(s),completions[idx])
                         end
                     end
-                    println(s.terminal)
+                    println(Readline.terminal(s))
                 end
             end
         end
     end
 
-    function refreshMultiLine(s::ReadlineState)
-        cols = width(s.terminal)
-
+    clear_input_area(s::PromptState) = (clear_input_area(s.terminal,s.ias); s.ias = InputAreaState(0,0))
+    function clear_input_area(terminal,state::InputAreaState)
         #println(s.curs_row)
         #println(s.num_rows)
 
         # Go to the last line
-        if s.curs_row < s.num_rows
-            cmove_down(s.terminal,s.num_rows-s.curs_row)
+        if state.curs_row < state.num_rows
+            cmove_down(terminal,state.num_rows-state.curs_row)
         end
 
         # Clear lines one by one going up
-        for j=0:(s.num_rows - 2)
-            clear_line(s.terminal)
-            cmove_up(s.terminal)
+        for j=0:(state.num_rows - 2)
+            clear_line(terminal)
+            cmove_up(terminal)
         end
 
         # Clear top line
-        clear_line(s.terminal)
+        clear_line(terminal)       
+    end 
+
+    prompt_string(s::PromptState) = s.p.prompt
+    prompt_string(s::String) = s
+
+    refreshMultiLine(s::PromptState) = s.ias = refreshMultiLine(s.terminal,buffer(s),s.ias,s,indent=s.indent)
+
+    function refreshMultiLine(terminal,buf,state::InputAreaState,prompt = "";indent = 0)
+        cols = width(terminal)
+
+        clear_input_area(terminal,state)
 
         curs_row = -1 #relative to prompt
         curs_col = -1 #absolute
         curs_pos = -1 # 1 - based column position of the cursor
         cur_row = 0
-        buf_pos = position(s.input_buffer)
+        buf_pos = position(buf)
         line_pos = buf_pos
         # Write out the prompt string
-        write_prompt(s)
+        write_prompt(terminal,prompt)
+        prompt = prompt_string(prompt)
 
-        seek(s.input_buffer,0)
+        seek(buf,0)
 
         llength = 0
 
@@ -124,13 +179,13 @@ module Readline
 
         # Now go through the buffer line by line
         while cur_row == 0 || (!isempty(l) && l[end] == '\n')
-            l = readline(s.input_buffer)
+            l = readline(buf)
             cur_row += 1
             # We need to deal with UTF8 characters. Since the IOBuffer is a bytearray, we just count bytes
             llength = length(l)
-            plength = length(s.prompt)
+            plength = length(prompt)
             slength = length(l.data)
-            pslength = length(s.prompt.data)
+            pslength = length(prompt.data)
             if cur_row == 1 #First line 
                 if line_pos < slength
                     num_chars = length(l[1:line_pos])
@@ -139,33 +194,33 @@ module Readline
                 end
                 cur_row += div(plength+llength-1,cols)
                 line_pos -= slength
-                write(s.terminal,l)
+                write(terminal,l)
             else
                 # We expect to be line after the last valid output line (due to
                 # the '\n' at the end of the previous line)
                 if curs_row == -1
                     if line_pos < slength
                         num_chars = length(l[1:line_pos])
-                        curs_row = cur_row+div(s.indent+num_chars-1,cols)
-                        curs_pos = (s.indent+num_chars-1)%cols+1
+                        curs_row = cur_row+div(indent+num_chars-1,cols)
+                        curs_pos = (indent+num_chars-1)%cols+1
                     end
                     line_pos -= slength #'\n' gets an extra pos
-                    cur_row += div(llength+s.indent-1,cols)
-                    cmove_col(s.terminal,s.indent+1)
-                    write(s.terminal,l)
+                    cur_row += div(llength+indent-1,cols)
+                    cmove_col(terminal,indent+1)
+                    write(terminal,l)
                     # There's an issue if the last character we wrote was at the very right end of the screen. In that case we need to
                     # emit a new line and move the cursor there. 
                     if curs_pos == cols
-                        write(s.terminal,"\n")
-                        cmove_col(s.terminal,1)
+                        write(terminal,"\n")
+                        cmove_col(terminal,1)
                         curs_row+=1
                         curs_pos=0
                         cur_row+=1
                     end
                 else
-                    cur_row += div(llength+s.indent-1,cols)
-                    cmove_col(s.terminal,s.indent+1)
-                    write(s.terminal,l)
+                    cur_row += div(llength+indent-1,cols)
+                    cmove_col(terminal,indent+1)
+                    write(terminal,l)
                 end
 
             end
@@ -173,21 +228,21 @@ module Readline
 
         end
 
-        seek(s.input_buffer,buf_pos)
+        seek(buf,buf_pos)
 
         # If we are at the end of the buffer, we need to put the cursor one past the 
         # last character we have written
         
         if curs_row == -1
-            curs_pos = (s.indent+llength-1)%cols+1
+            curs_pos = (indent+llength-1)%cols+1
             curs_row = cur_row
         end
 
         # Same issue as above. TODO: We should figure out 
         # how to refactor this to avoid duplcating functionality.
         if curs_pos == cols
-            write(s.terminal,"\n")
-            cmove_col(s.terminal,1)
+            write(terminal,"\n")
+            cmove_col(terminal,1)
             curs_row+=1
             curs_pos=0
             cur_row+=1
@@ -198,22 +253,22 @@ module Readline
         # The line first
         n = cur_row-curs_row
         if n>0
-            cmove_up(s.terminal,n)
+            cmove_up(terminal,n)
         end
 
         #columns are 1 based
-        cmove_col(s.terminal,curs_pos+1)
+        cmove_col(terminal,curs_pos+1)
 
-        s.num_rows = cur_row
-        s.curs_row = curs_row
+        flush(terminal)
 
-        flush(s.terminal)
+        # Updated cur_row,curs_row
+        return InputAreaState(cur_row,curs_row)
     end
 
 
     # Edit functionality
 
-    char_move_left(s::ReadlineState) = char_move_left(s.input_buffer)
+    char_move_left(s::PromptState) = char_move_left(s.input_buffer)
     function char_move_left(buf::IOBuffer)
         while position(buf)>0
             seek(buf,position(buf)-1)
@@ -224,7 +279,7 @@ module Readline
         end
     end
 
-    function edit_move_left(s)
+    function edit_move_left(s::PromptState)
         if position(s.input_buffer)>0
             #move t=o the next UTF8 character to the left
             char_move_left(s.input_buffer)
@@ -232,7 +287,7 @@ module Readline
         end
     end
 
-    char_move_right(s::ReadlineState) = char_move_right(s.input_buffer)
+    char_move_right(s::PromptState) = char_move_right(s.input_buffer)
     function char_move_right(buf::IOBuffer)
         while position(buf) != buf.size
             seek(buf,position(buf)+1)
@@ -249,7 +304,7 @@ module Readline
     const non_word_chars = " \t\n\"\\'`@\$><=:;|&{}()[].,+-*/?%^~"
 
     function char_move_word_right(s)
-        while !eof(s.input_buffer) && !contains(non_word_chars,read(s.input_buffer,Char))
+        while !eof(s.input_buffer) && !in(read(s.input_buffer,Char),non_word_chars)
         end
     end
 
@@ -257,7 +312,7 @@ module Readline
         while position(s.input_buffer) > 0
             char_move_left(s)
             c = peek(s.input_buffer)
-            if c < 0x80 && contains(non_word_chars,char(c))
+            if c < 0x80 && in(char(c),non_word_chars)
                 read(s.input_buffer,Uint8)
                 break
             end
@@ -295,11 +350,11 @@ module Readline
         write(s.input_buffer,str)
     end
 
-    function edit_insert(s::ReadlineState,c)
+    function edit_insert(s::PromptState,c)
         edit_insert(s.input_buffer,c)
-        if c != '\n' && eof(s.input_buffer) && (position(s.input_buffer) + length(s.prompt)) < width(s.terminal) 
+        if c != '\n' && eof(s.input_buffer) && (position(s.input_buffer) + length(s.p.prompt)) < width(Readline.terminal(s)) 
             #Avoid full update
-            write(s.terminal,c)
+            write(Readline.terminal(s),c)
         else
             refresh_line(s)
         end
@@ -319,11 +374,11 @@ module Readline
         end
     end
 
-    function edit_backspace(s::ReadlineState)
+    function edit_backspace(s::PromptState)
         if edit_backspace(s.input_buffer)
             refresh_line(s) 
         else
-            beep(s.terminal)
+            beep(Readline.terminal(s))
         end
 
     end
@@ -350,15 +405,15 @@ module Readline
             seek(s.input_buffer,oldpos)
             refresh_line(s)
         else
-            beep(s.terminal)
+            beep(Readline.terminal(s))
         end
     end
 
-    function replace_line(s,l::IOBuffer)
+    function replace_line(s::PromptState,l::IOBuffer)
         s.input_buffer = l
     end
 
-    function replace_line(s,l)
+    function replace_line(s::PromptState,l)
         s.input_buffer.ptr = 1
         s.input_buffer.size = 0
         write(s.input_buffer,l)
@@ -368,23 +423,25 @@ module Readline
     history_next(::EmptyHistoryProvider) = ("",false)
     history_search(::EmptyHistoryProvider,args...) = false
     add_history(::EmptyHistoryProvider,s) = nothing
+    add_history(s::PromptState) = add_history(mode(s).hist,s)
 
-    function history_prev(s) 
-        (l,ok) = history_prev(s.hist,s)
+
+    function history_prev(s,hist) 
+        (l,ok) = history_prev(mode(s).hist,s)
         if ok
             replace_line(s,l)
             refresh_line(s)
         else
-            beep(s.terminal)
+            beep(Readline.terminal(s))
         end
     end
-    function history_next(s) 
-        (l,ok) = history_next(s.hist,s)
+    function history_next(s,hist) 
+        (l,ok) = history_next(mode(s).hist,s)
         if ok
             replace_line(s,l)
             refresh_line(s)
         else
-            beep(s.terminal)
+            beep(Readline.terminal(s))
         end
     end
 
@@ -393,12 +450,14 @@ module Readline
     default_completion_cb(::IOBuffer) = []
     default_enter_cb(::IOBuffer) = true
 
-    write_prompt(s) = write_prompt(s,s.prompt)
-    function write_prompt(s,prompt)
-        write(s.terminal,s.prompt_color)
-        write(s.terminal,prompt)
-        write(s.terminal,s.input_color)
+    write_prompt(terminal,s::PromptState) = write_prompt(terminal,s,s.p.prompt)
+    function write_prompt(terminal,s::PromptState,prompt)
+        @assert terminal == Readline.terminal(s)
+        write(terminal,s.p.prompt_color)
+        write(terminal,prompt)
+        write(terminal,s.p.input_color)
     end
+    write_prompt(terminal,s::ASCIIString) = write(terminal,s)
 
     function normalize_key(key)
         if isa(key,Char)
@@ -406,7 +465,7 @@ module Readline
         elseif isa(key,Integer)
             return string(char(key))
         elseif isa(key,String)
-            if contains(key,'\0')
+            if in('\0',key)
                 error("Matching \\0 not currently supported.")
             end
             buf = IOBuffer()
@@ -478,7 +537,7 @@ module Readline
     function keymap_gen_body(dict,subdict::Dict,level)
         block = Expr(:block)
         bc = symbol("c"*string(level))
-        push!(block.args,:($bc=read(s.terminal,Char)))
+        push!(block.args,:($bc=read(Readline.terminal(s),Char)))
 
         if haskey(subdict,'\0')
             last_if = keymap_gen_body(dict,subdict['\0'],level+1)
@@ -589,7 +648,7 @@ module Readline
         dict = keymap_unify(keymap_prepare(isa(keymaps,Expr)?eval(keymaps):keymaps))
         body = keymap_gen_body(dict,dict)
         esc(quote
-            function $(func)(s::Readline.ReadlineState,data)
+            function $(func)(s,data)
                 $body
                 return :ok
             end
@@ -610,7 +669,7 @@ module Readline
         "\e[6**" => nothing
     }
 
-    function write_response_buffer(s,data)
+    function write_response_buffer(s::PromptState,data)
         offset = s.input_buffer.ptr
         ptr = data.respose_buffer.ptr
         seek(data.respose_buffer,0)
@@ -620,69 +679,110 @@ module Readline
         refresh_line(s)
     end
 
-    function update_display_buffer(s,data)
-        truncate(s.input_buffer,0)
-        write(s.input_buffer,pointer(data.query_buffer.data),data.query_buffer.ptr-1)
-        write(s.input_buffer,"': ")
-        history_search(data.s.hist,data.s,data.query_buffer,data.respose_buffer,data.backward,false) || beep(s.terminal)
-        write_response_buffer(s,data)
-
-    end
-
-    function history_next_result(s,data)
-        truncate(s.input_buffer,s.input_buffer.size - data.respose_buffer.size)
-        history_search(data.s.hist,data.s,data.query_buffer,data.respose_buffer,data.backward,true) || beep(s.terminal)
-        write_response_buffer(s,data)
-    end
-
-    function history_set_backward(s,data,backward)
-        data.backward = backward
-        s.prompt = backward ? "(reverse-i-search)`" : "(i-search)`"
-    end
-
-    const search_keymap = {
-        "^R" => :( Readline.history_set_backward(s,data,true); Readline.history_next_result(s,data) ),
-        "^S" => :( Readline.history_set_backward(s,data,false); Readline.history_next_result(s,data) ),
-        "\r" => :( s.input_buffer = data.respose_buffer; return :done ),
-        "\t" => nothing, #TODO: Maybe allow tab completion in R-Search?
-
-        # Backspace/^H
-        '\b' => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(s.terminal)),
-        127 => '\b',
-        "^C" => :( return :abort ),
-        "^D" => :( return :abort ),
-
-        "*" => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
-    }
-    @Readline.keymap search_keymap_func [Readline.search_keymap,Readline.escape_defaults]
-
-
     type SearchState
-        s::ReadlineState
-        backward::Bool #rsearch or ssearch
+        terminal
+        histprompt
+        #rsearch (true) or ssearch (false)
+        backward::Bool 
         query_buffer::IOBuffer
         respose_buffer::IOBuffer
-    end
+        ias::InputAreaState
+        #The prompt whose input will be replaced by the matched history
+        parent
+        SearchState(a,b,c,d,e) = new(a,b,c,d,e,InputAreaState(0,0)) 
+    end    
 
-    function enter_rsearch(s)
-        (buf,ok) = prompt!(s.terminal,"(reverse-i-search)`";first_prompt = "(reverse-i-search)`': ",
-            keymap_func=search_keymap_func,keymap_func_data=SearchState(s,true,IOBuffer(),IOBuffer()))
-        if ok
-            s.input_buffer = buf
-        end
-        raw!(s.terminal,true)
+    terminal(s::SearchState) = s.terminal
+
+    function update_display_buffer(s::SearchState,data)
+        history_search(data.histprompt.hp,data.query_buffer,data.respose_buffer,data.backward,false) || beep(Readline.terminal(s))
         refresh_line(s)
     end
 
-    function enter_ssearch(s)
-        (buf,ok) = prompt!(s.terminal,"(i-search)`";first_prompt = "(i-search)`': ",
-            keymap_func=search_keymap_func,keymap_func_data=SearchState(s,false,IOBuffer(),IOBuffer()))
-        if ok
-            s.input_buffer = buf
-        end
-        raw!(s.terminal,true)
-        refresh_line(s)
+    function history_next_result(s::SearchState,data)
+        truncate(s.input_buffer,s.input_buffer.size - data.respose_buffer.size)
+        history_search(data.s.hist,data.s,data.query_buffer,data.respose_buffer,data.backward,true) || beep(Readline.terminal(s))
+        write_response_buffer(s,data)
     end
+
+    function history_set_backward(s::SearchState,data,backward)
+        data.backward = backward
+    end
+
+    function refreshMultiLine(s::SearchState)
+        buf = IOBuffer()
+        write(buf,pointer(s.query_buffer.data),s.query_buffer.ptr-1)
+        write(buf,"': ")
+        offset = buf.ptr
+        ptr = s.respose_buffer.ptr
+        seek(s.respose_buffer,0)
+        write(buf,readall(s.respose_buffer))
+        buf.ptr = offset+ptr-2
+        s.respose_buffer.ptr = ptr
+        refreshMultiLine(s.terminal,buf,s.ias,s.backward ? "(reverse-i-search)`" : "(i-search)`")
+    end
+
+    function reset_state(s::SearchState)
+        if s.query_buffer.size != 0
+            s.query_buffer.size = 0
+            s.query_buffer.ptr = 1
+        end
+        if s.respose_buffer.size != 0
+            s.respose_buffer.size = 0
+            s.query_buffer.ptr = 1
+        end
+        reset_state(s.histprompt.hp)
+    end
+
+    type HistoryPrompt <: TextInterface
+        hp::HistoryProvider
+        keymap_func::Function
+        HistoryPrompt(hp) = new(hp)
+    end
+
+    init_state(terminal,p::HistoryPrompt) = SearchState(terminal,p,true,IOBuffer(),IOBuffer())
+
+    state(s::MIState,p) = s.mode_state[p]
+    state(s::PromptState,p) = (@assert s.p == p; s)
+    mode(s::MIState) = s.current_mode
+    mode(s::PromptState) = s.p
+    mode(s::SearchState) = @assert false
+
+    function setup_search_keymap(hp) 
+        p = HistoryPrompt(hp)
+        pkeymap = {
+            "^R" => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
+            "^S" => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
+            "\r" => (s)->begin
+                parent = state(s,p)
+                replace_line(state(s,parent),data.respose_buffer)
+                transition(s,mode(parent))
+            end,
+            "\t" => nothing, #TODO: Maybe allow tab completion in R-Search?
+
+            # Backspace/^H
+            '\b' => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(Readline.terminal(s))),
+            127 => '\b',
+            "^C" => :( return :abort ),
+            "^D" => :( return :abort ),
+
+            "*" => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
+        }
+        @eval @Readline.keymap keymap_func $([pkeymap, escape_defaults])
+        p.keymap_func = keymap_func
+        keymap = {
+            "^R" => s->( state(s,p).parent = mode(s); state(s,p).backward = true; transition(s,p) ),
+            "^S" => s->( state(s,p).parent = mode(s); state(s,p).backward = false; transition(s,p) ),
+        }
+        (p,keymap)
+    end
+
+    keymap(state,p::HistoryPrompt) = p.keymap_func
+    keymap_data(state,::HistoryPrompt) = state
+
+    Base.isempty(s::PromptState) = s.input_buffer.size == 0
+
+    on_enter(s::PromptState) = s.p.on_enter(s)
 
     const default_keymap =
     {   
@@ -690,9 +790,9 @@ module Readline
         '\t' => :(Readline.completeLine(s); Readline.refresh_line(s)),
         # Enter
         '\r' => quote
-            if s.enter_cb(s)
-                println(s.terminal)
-                Readline.add_history(s.hist,s)
+            if Readline.on_enter(s)
+                println(Readline.terminal(s))
+                Readline.add_history(s)
                 return :done
             else
                 Readline.edit_insert(s,'\n')
@@ -703,10 +803,10 @@ module Readline
         127 => '\b',
         # ^D
         4 => quote 
-            if s.input_buffer.size > 0
+            if Readline.buffer(s).size > 0
                 Readline.edit_delete(s)
             else
-                println(s.terminal)
+                println(Readline.terminal(s))
                 return :abort
             end
         end,
@@ -714,18 +814,6 @@ module Readline
         2 => edit_move_left,
         # ^F
         6 => edit_move_right,
-        # ^P
-        16 => history_prev,
-        # ^N
-        14 => history_next,
-        # Up Arrow
-        "\e[A" => history_prev,
-        # Down Arrow
-        "\e[B" => history_next,
-        # Right Arrow
-        "\e[C" => edit_move_right,
-        # Left Arrow
-        "\e[D" => edit_move_left,
         # Meta Enter
         "\e\r" => :(Readline.edit_insert(s,'\n')),
         # Simply insert it into the buffer by default
@@ -739,42 +827,125 @@ module Readline
         # ^E
         5 => :( seek(s.input_buffer,s.input_buffer.size-1);Readline.refresh_line(s) ),
         # ^L
-        12 => :( clear(s.terminal); Readline.refresh_line(s) ),
+        12 => :( clear(Readline.terminal(s)); Readline.refresh_line(s) ),
         # ^W (#edit_delte_prev_word(s))
         23 => :( error("Unimplemented") ),
-        # ^R
-        "^R" => enter_rsearch,
-        "^S" => enter_ssearch
+        # Right Arrow
+        "\e[C" => edit_move_right,
+        # Left Arrow
+        "\e[D" => edit_move_left,
     }
+
+    function history_keymap(hist) 
+        return {
+            # ^P
+            16 => :( Readline.history_prev(s,$hist) ),
+            # ^N
+            14 => :( Readline.history_next(s,$hist) ),
+            # Up Arrow
+            "\e[A" => :( Readline.history_prev(s,$hist) ),
+            # Down Arrow
+            "\e[B" => :( Readline.history_next(s,$hist) )
+        }
+    end
+
+    function deactivate(p::Prompt,s::PromptState)
+        clear_input_area(s)
+        s
+    end
+
+    function activate(p::Union(Prompt,HistoryPrompt),s::Union(SearchState,PromptState))
+        s.ias = InputAreaState(0,0)
+        refresh_line(s)
+    end
+
+    function activate(p::Union(Prompt,HistoryPrompt),s::MIState)
+        @assert p == s.current_mode
+        activate(p,s.mode_state[s.current_mode])
+    end
+    activate(m::ModalInterface,s::MIState) = activate(s.current_mode,s)
+
+    function transition(s::MIState,mode)
+        if mode == :abort
+            s.aborted = true
+            return
+        end
+        mode == :reset && return
+        s.mode_state[s.current_mode] = deactivate(s.current_mode,s.mode_state[s.current_mode])
+        s.current_mode = mode
+        activate(mode,s.mode_state[mode])
+    end
+
+    function reset_state(s::PromptState)
+        if s.input_buffer.size != 0
+            s.input_buffer.size = 0
+            s.input_buffer.ptr = 1
+        end
+    end
+
+    function reset_state(s::MIState)
+        for (mode,state) in s.mode_state
+            reset_state(state)
+        end
+    end
 
     @Readline.keymap default_keymap_func [Readline.default_keymap,Readline.escape_defaults]
 
-    function prompt!(terminal,prompt;
-                    first_prompt = prompt,
-                    prompt_color="",
-                    keymap_func = default_keymap_func,
-                    keymap_func_data = nothing,
-                    input_color="",
-                    complete=EmptyCompletionProvider(),
-                    on_enter=default_enter_cb,hist=EmptyHistoryProvider())
-        s = ReadlineState(terminal,hist,complete,on_enter,IOBuffer(),prompt,prompt_color,input_color,1,1,length(prompt))
+    function Prompt(prompt;
+        first_prompt = prompt,
+        prompt_color="",
+        keymap_func = default_keymap_func,
+        keymap_func_data = nothing,
+        input_color="",
+        complete=EmptyCompletionProvider(),
+        on_enter=default_enter_cb,on_done=()->nothing,hist=EmptyHistoryProvider())
+        Prompt(prompt,first_prompt,prompt_color,keymap_func,keymap_func_data,input_color,complete,on_enter,on_done,hist)
+    end
+
+    function run_interface(::Prompt)
+
+    end
+
+    init_state(terminal,prompt::Prompt) = PromptState(terminal,prompt,IOBuffer(),InputAreaState(1,1),length(prompt.prompt))
+
+    function init_state(terminal,m::ModalInterface)
+        s = MIState(m,m.modes[1],false,Dict{Any,Any}())
+        for mode in m.modes
+            s.mode_state[mode] = init_state(terminal,mode)
+        end
+        s
+    end
+
+    function run_interface(terminal,m::ModalInterface)
+        s = init_state(terminal,m)
+        while !s.aborted
+            p = s.current_mode
+            buf,ok = prompt!(terminal,m,s)
+            s.mode_state[s.current_mode].p.on_done(s,buf,ok)
+        end
+    end
+
+    buffer(s::PromptState) = s.input_buffer
+
+    keymap(s::PromptState,prompt::Prompt) = prompt.keymap_func
+    keymap_data(s::PromptState,prompt::Prompt) = prompt.keymap_func_data
+    keymap(ms::MIState,m::ModalInterface) = keymap(ms.mode_state[ms.current_mode],ms.current_mode)
+    keymap_data(ms::MIState,m::ModalInterface) = keymap_data(ms.mode_state[ms.current_mode],ms.current_mode)
+
+    function prompt!(terminal,prompt,s=init_state(terminal,prompt))
         raw!(terminal,true)
         try
-            clear_line(s.terminal) 
-            write_prompt(s,first_prompt)
+            activate(prompt,s)
             while true
-                state = keymap_func(s,keymap_func_data)
+                state = keymap(s,prompt)(s,keymap_data(s,prompt))
                 if state == :abort
-                    return (s.input_buffer,false)
+                    return (buffer(s),false)
                 elseif state == :done
-                    return (s.input_buffer,true)
+                    return (buffer(s),true)
                 else
                     @assert state == :ok
                 end
             end
-            raw!(terminal,false)
-            println(terminal)
-            return s.input_buffer
         finally
             raw!(terminal,false)
         end
