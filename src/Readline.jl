@@ -131,7 +131,7 @@ module Readline
         end
     end
 
-    clear_input_area(s::PromptState) = (clear_input_area(s.terminal,s.ias); s.ias = InputAreaState(0,0))
+    clear_input_area(s) = (clear_input_area(s.terminal,s.ias); s.ias = InputAreaState(0,0))
     function clear_input_area(terminal,state::InputAreaState)
         #println(s.curs_row)
         #println(s.num_rows)
@@ -187,7 +187,7 @@ module Readline
             slength = length(l.data)
             pslength = length(prompt.data)
             if cur_row == 1 #First line 
-                if line_pos < slength
+                if line_pos <= slength
                     num_chars = length(l[1:line_pos])
                     curs_row = div(plength+num_chars-1,cols)+1
                     curs_pos = (plength+num_chars-1)%cols+1
@@ -699,14 +699,14 @@ module Readline
         refresh_line(s)
     end
 
-    function history_next_result(s::SearchState,data)
-        truncate(s.input_buffer,s.input_buffer.size - data.respose_buffer.size)
-        history_search(data.s.hist,data.s,data.query_buffer,data.respose_buffer,data.backward,true) || beep(Readline.terminal(s))
-        write_response_buffer(s,data)
+    function history_next_result(s::MIState,data::SearchState)
+        #truncate(data.query_buffer,s.input_buffer.size - data.respose_buffer.size)
+        history_search(data.histprompt.hp,data.query_buffer,data.respose_buffer,data.backward,true) || beep(Readline.terminal(s))
+        refresh_line(data)
     end
 
-    function history_set_backward(s::SearchState,data,backward)
-        data.backward = backward
+    function history_set_backward(s::SearchState,backward)
+        s.backward = backward
     end
 
     function refreshMultiLine(s::SearchState)
@@ -717,7 +717,7 @@ module Readline
         ptr = s.respose_buffer.ptr
         seek(s.respose_buffer,0)
         write(buf,readall(s.respose_buffer))
-        buf.ptr = offset+ptr-2
+        buf.ptr = offset+ptr-1
         s.respose_buffer.ptr = ptr
         refreshMultiLine(s.terminal,buf,s.ias,s.backward ? "(reverse-i-search)`" : "(i-search)`")
     end
@@ -754,18 +754,17 @@ module Readline
             "^R" => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
             "^S" => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
             "\r" => (s)->begin
-                parent = state(s,p)
-                replace_line(state(s,parent),data.respose_buffer)
-                transition(s,mode(parent))
+                parent = state(s,p).parent
+                replace_line(state(s,parent),state(s,p).respose_buffer)
+                transition(s,parent)
             end,
             "\t" => nothing, #TODO: Maybe allow tab completion in R-Search?
 
             # Backspace/^H
             '\b' => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(Readline.terminal(s))),
             127 => '\b',
-            "^C" => :( return :abort ),
-            "^D" => :( return :abort ),
-
+            "^C" => s->transition(s,state(s,p).parent),
+            "^D" => s->transition(s,state(s,p).parent),
             "*" => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
         }
         @eval @Readline.keymap keymap_func $([pkeymap, escape_defaults])
@@ -849,7 +848,7 @@ module Readline
         }
     end
 
-    function deactivate(p::Prompt,s::PromptState)
+    function deactivate(p::Union(Prompt,HistoryPrompt),s::Union(SearchState,PromptState))
         clear_input_area(s)
         s
     end
@@ -926,6 +925,7 @@ module Readline
     end
 
     buffer(s::PromptState) = s.input_buffer
+    buffer(s::SearchState) = s.query_buffer
 
     keymap(s::PromptState,prompt::Prompt) = prompt.keymap_func
     keymap_data(s::PromptState,prompt::Prompt) = prompt.keymap_func_data
