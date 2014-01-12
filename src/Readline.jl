@@ -783,6 +783,9 @@ module Readline
 
     on_enter(s::PromptState) = s.p.on_enter(s)
 
+    move_line_start(s) = (seek(buffer(s),0); refresh_line(s))
+    move_line_end(s) = (seekend(buffer(s)); refresh_line(s))
+
     const default_keymap =
     {   
         # Tab
@@ -820,11 +823,11 @@ module Readline
         # ^U
         21 => :( truncate(Readline.buffer(s),0); Readline.refresh_line(s) ),
         # ^K
-        11 => :( truncate(Readline.buffer(s),position(Readline.buffer(s))) ),
+        11 => :( truncate(Readline.buffer(s),position(Readline.buffer(s))); Readline.refresh_line(s) ),
         # ^A    
-        1 => :( seek(Readline.buffer(s),0); Readline.refresh_line(s) ),
+        1 => move_line_start,
         # ^E
-        5 => :( seekend(Readline.buffer(s));Readline.refresh_line(s) ),
+        5 => move_line_end,
         # ^L
         12 => :( Terminals.clear(Readline.terminal(s)); Readline.refresh_line(s) ),
         # ^W (#edit_delte_prev_word(s))
@@ -835,6 +838,15 @@ module Readline
         "\e[C" => edit_move_right,
         # Left Arrow
         "\e[D" => edit_move_left,
+        # Try to catch all Home/End keys
+        "\e[1~" => move_line_start,
+        "\e[4~" => move_line_end,
+        "\e[7~" => move_line_start,
+        "\e[8~" => move_line_end,
+        "\eOH"  => move_line_start,
+        "\eOF"  => move_line_end,
+        "\e[H"  => move_line_start,
+        "\e[F"  => move_line_end
     }
 
     function history_keymap(hist) 
