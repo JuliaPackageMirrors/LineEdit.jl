@@ -818,17 +818,19 @@ module Readline
         # Simply insert it into the buffer by default
         "*" => :( Readline.edit_insert(s,c1) ),
         # ^U
-        21 => :( truncate(s.input_buffer,0); Readline.refresh_line(s) ),
+        21 => :( truncate(Readline.buffer(s),0); Readline.refresh_line(s) ),
         # ^K
-        11 => :( truncate(s.input_buffer,position(s.input_buffer)) ),
+        11 => :( truncate(Readline.buffer(s),position(Readline.buffer(s))) ),
         # ^A    
-        1 => :( seek(s.input_buffer,0); Readline.refresh_line(s) ),
+        1 => :( seek(Readline.buffer(s),0); Readline.refresh_line(s) ),
         # ^E
-        5 => :( seek(s.input_buffer,s.input_buffer.size-1);Readline.refresh_line(s) ),
+        5 => :( seekend(Readline.buffer(s));Readline.refresh_line(s) ),
         # ^L
-        12 => :( clear(Readline.terminal(s)); Readline.refresh_line(s) ),
+        12 => :( Terminals.clear(Readline.terminal(s)); Readline.refresh_line(s) ),
         # ^W (#edit_delte_prev_word(s))
         23 => :( error("Unimplemented") ),
+        # ^C
+        "^C" => :( print(Readline.terminal(s), "^C\n\n"); transition(s,:reset); Readline.refresh_line(s) ),
         # Right Arrow
         "\e[C" => edit_move_right,
         # Left Arrow
@@ -869,7 +871,10 @@ module Readline
             s.aborted = true
             return
         end
-        mode == :reset && return
+        if mode == :reset 
+            reset_state(s)
+            return
+        end
         s.mode_state[s.current_mode] = deactivate(s.current_mode,s.mode_state[s.current_mode])
         s.current_mode = mode
         activate(mode,s.mode_state[mode])
