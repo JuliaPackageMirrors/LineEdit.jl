@@ -455,6 +455,7 @@ module Readline
         @assert terminal == Readline.terminal(s)
         write(terminal,s.p.prompt_color)
         write(terminal,prompt)
+        write(terminal,Base.text_colors[:normal])
         write(terminal,s.p.input_color)
     end
     write_prompt(terminal,s::ASCIIString) = write(terminal,s)
