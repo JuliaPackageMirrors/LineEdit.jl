@@ -177,22 +177,22 @@ module Readline
 
         l=""
 
+        plength = length(prompt)
+        pslength = length(prompt.data)
         # Now go through the buffer line by line
         while cur_row == 0 || (!isempty(l) && l[end] == '\n')
             l = readline(buf)
             cur_row += 1
             # We need to deal with UTF8 characters. Since the IOBuffer is a bytearray, we just count bytes
             llength = length(l)
-            plength = length(prompt)
             slength = length(l.data)
-            pslength = length(prompt.data)
             if cur_row == 1 #First line 
-                if line_pos <= slength
-                    num_chars = length(l[1:line_pos])
+                num_chars = length(l[1:line_pos])
+                if line_pos < slength
                     curs_row = div(plength+num_chars-1,cols)+1
-                    curs_pos = (plength+num_chars-1)%cols+1
                 end
                 cur_row += div(plength+llength-1,cols)
+                curs_pos = (plength+num_chars-1)%cols+1
                 line_pos -= slength
                 write(terminal,l)
             else
@@ -234,7 +234,7 @@ module Readline
         # last character we have written
         
         if curs_row == -1
-            curs_pos = (indent+llength-1)%cols+1
+            curs_pos = ((cur_row == 1 ? plength : indent)+llength-1)%cols+1
             curs_row = cur_row
         end
 
@@ -800,6 +800,7 @@ module Readline
                 Readline.edit_insert(s,'\n')
             end
         end,
+        '\n' => '\r',
         # Backspace/^H
         '\b' => edit_backspace,
         127 => '\b',
