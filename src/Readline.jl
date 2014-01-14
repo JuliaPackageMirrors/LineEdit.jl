@@ -1,4 +1,4 @@
-module Readline
+    module Readline
     using Terminals
 
     import Terminals: raw!, width, height, cmove, Rect, Size, getX, 
@@ -784,8 +784,41 @@ module Readline
 
     on_enter(s::PromptState) = s.p.on_enter(s)
 
-    move_line_start(s) = (seek(buffer(s),0); refresh_line(s))
-    move_line_end(s) = (seekend(buffer(s)); refresh_line(s))
+    move_input_start(s) = (seek(buffer(s),0); refresh_line(s))
+    move_input_end(s) = (seekend(buffer(s)); refresh_line(s))
+    function move_line_start(s)
+        buf = buffer(s)
+        curpos = position(buf)
+        if curpos == 0
+            return
+        end
+        if buf.data[curpos] == '\n'
+            move_input_start(s)
+        else
+            seek(buf,rsearch(buf.data,'\n',curpos-1))
+        end
+        refresh_line(s)
+    end
+    function move_line_end(s)
+        buf = buffer(s)
+        curpos = position(buf)
+        if eof(buf)
+            return
+        end
+        c = read(buf,Char)
+        if c == '\n'
+            move_input_end(s)
+            return
+        end
+        seek(buf,curpos)
+        pos = search(buffer(s).data,'\n',curpos+1)
+        if pos == 0
+            move_input_end(s)
+            return
+        end
+        seek(buf,pos-1)
+        refresh_line(s)
+    end
 
     const default_keymap =
     {   
@@ -841,14 +874,14 @@ module Readline
         # Left Arrow
         "\e[D" => edit_move_left,
         # Try to catch all Home/End keys
-        "\e[1~" => move_line_start,
-        "\e[4~" => move_line_end,
-        "\e[7~" => move_line_start,
-        "\e[8~" => move_line_end,
-        "\eOH"  => move_line_start,
-        "\eOF"  => move_line_end,
-        "\e[H"  => move_line_start,
-        "\e[F"  => move_line_end
+        "\e[1~" => move_input_start,
+        "\e[4~" => move_input_end,
+        "\e[7~" => move_input_start,
+        "\e[8~" => move_input_end,
+        "\eOH"  => move_input_start,
+        "\eOF"  => move_input_end,
+        "\e[H"  => move_input_start,
+        "\e[F"  => move_input_end
     }
 
     function history_keymap(hist) 
