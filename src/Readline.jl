@@ -287,7 +287,7 @@
         end
     end
 
-    char_move_right(s::PromptState) = char_move_right(s.input_buffer)
+    char_move_right(s) = char_move_right(buffer(s))
     function char_move_right(buf::IOBuffer)
         while position(buf) != buf.size
             seek(buf,position(buf)+1)
@@ -396,13 +396,14 @@
     end
 
     function edit_delete(s)
-        if s.input_buffer.size>0 && position(s.input_buffer) < s.input_buffer.size
-            oldpos = position(s.input_buffer)
+        buf = buffer(s)
+        if buf.size>0 && position(buf) < buf.size
+            oldpos = position(buf)
             char_move_right(s)
-            ccall(:memmove, Void, (Ptr{Void},Ptr{Void},Int), pointer(s.input_buffer.data,oldpos+1), pointer(s.input_buffer.data,position(s.input_buffer)+1), 
-                s.input_buffer.size-position(s.input_buffer))
-            s.input_buffer.size -= position(s.input_buffer)-oldpos
-            seek(s.input_buffer,oldpos)
+            ccall(:memmove, Void, (Ptr{Void},Ptr{Void},Int), pointer(buf.data,oldpos+1), pointer(buf.data,position(buf)+1), 
+                buf.size-position(buf))
+            buf.size -= position(buf)-oldpos
+            seek(buf,oldpos)
             refresh_line(s)
         else
             beep(Readline.terminal(s))
