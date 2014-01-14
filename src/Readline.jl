@@ -186,13 +186,13 @@ module Readline
             # We need to deal with UTF8 characters. Since the IOBuffer is a bytearray, we just count bytes
             llength = length(l)
             slength = length(l.data)
-            if cur_row == 1 #First line 
-                num_chars = length(l[1:line_pos])
+            if cur_row == 1 #First line
                 if line_pos < slength
+                    num_chars = length(l[1:line_pos])
                     curs_row = div(plength+num_chars-1,cols)+1
+                    curs_pos = (plength+num_chars-1)%cols+1
                 end
                 cur_row += div(plength+llength-1,cols)
-                curs_pos = (plength+num_chars-1)%cols+1
                 line_pos -= slength
                 write(terminal,l)
             else
