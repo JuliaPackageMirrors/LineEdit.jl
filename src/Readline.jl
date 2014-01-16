@@ -794,9 +794,7 @@
         pkeymap = {
             "^R"    => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
             "^S"    => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
-            "\r"    => (s)->begin
-                    
-            end,
+            "\r"    => s->accept_result(s),
             "\t"    => nothing, #TODO: Maybe allow tab completion in R-Search?
 
             # Backspace/^H
@@ -891,6 +889,8 @@
             if Readline.on_enter(s)
                 println(Readline.terminal(s))
                 Readline.add_history(s)
+                Readline.state(s,Readline.mode(s)).ias = 
+                    Readline.InputAreaState(0,0)
                 return :done
             else
                 Readline.edit_insert(s,'\n')
