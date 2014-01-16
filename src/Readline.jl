@@ -351,10 +351,12 @@
     end
 
     function edit_insert(s::PromptState,c)
-        edit_insert(s.input_buffer,c)
-        if c != '\n' && eof(s.input_buffer) && (position(s.input_buffer) + length(s.p.prompt)) < width(Readline.terminal(s)) 
+        str = string(c)
+        edit_insert(s.input_buffer,str)
+        if !('\n' in str) && eof(s.input_buffer) && 
+            ((position(s.input_buffer) + length(s.p.prompt) + sizeof(str) - 1) < width(Readline.terminal(s)))
             #Avoid full update
-            write(Readline.terminal(s),c)
+            write(Readline.terminal(s),str)
         else
             refresh_line(s)
         end
@@ -365,11 +367,12 @@
         if eof(buf)
             write(buf,c)
         else
-            ensureroom(buf,buf.size-position(buf)+charlen(c))
+            s = string(c)
+            ensureroom(buf,buf.size-position(buf)+sizeof(s))
             oldpos = position(buf)
-            ccall(:memmove, Void, (Ptr{Void},Ptr{Void},Int), pointer(buf.data,position(buf)+1+charlen(c)), pointer(buf.data,position(buf)+1), 
+            ccall(:memmove, Void, (Ptr{Void},Ptr{Void},Int), pointer(buf.data,position(buf)+1+sizeof(s)), pointer(buf.data,position(buf)+1), 
                 buf.size-position(buf))
-            buf.size += charlen(c)
+            buf.size += sizeof(s)
             write(buf,c)
         end
     end
@@ -865,7 +868,24 @@
     const default_keymap =
     {   
         # Tab
-        '\t' => :(Readline.completeLine(s); Readline.refresh_line(s)),
+        '\t' => s->begin
+            buf = buffer(s)
+            # Yes, we are ignoring the possiblity
+            # the we could be in the middle of a multi-byte
+            # sequence, here but that's ok, since any 
+            # whitespace we're interested in is only one byte
+            if position(buf) != 0
+                c = buf.data[position(buf)]
+            else 
+                c = '\n'
+            end
+            if c == ' ' || c == '\n' || c == '\t'
+                edit_insert(s," "^4)
+                return
+            end
+            Readline.completeLine(s) 
+            Readline.refresh_line(s)
+        end,
         # Enter
         '\r' => quote
             if Readline.on_enter(s)
