@@ -944,6 +944,17 @@
         "\e[C" => edit_move_right,
         # Left Arrow
         "\e[D" => edit_move_left,
+        # Bracketed Paste Mode
+        "\e[200~" => s->begin
+            ps = state(s,mode(s))
+            input = readuntil(ps.terminal,"\e[201~")[1:(end-6)]
+            input = replace(input,'\r','\n')
+            if position(buffer(s)) == 0
+                indent = Base.indentation(input)[1]
+                input = Base.unindent(input[(indent+1):end],indent)
+            end
+            edit_insert(s,input)
+        end,
     }
 
     function history_keymap(hist) 
@@ -1049,6 +1060,7 @@
 
     function prompt!(terminal,prompt,s=init_state(terminal,prompt))
         raw!(terminal,true)
+        isa(terminal,UnixTerminal) && Terminals.Unix.enable_bracketed_paste(terminal)
         try
             activate(prompt,s)
             while true
@@ -1062,7 +1074,7 @@
                 end
             end
         finally
-            raw!(terminal,false)
+            raw!(terminal,false) && Terminals.Unix.disable_bracketed_paste(terminal)
         end
     end
 end
