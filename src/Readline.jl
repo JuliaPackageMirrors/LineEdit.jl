@@ -519,7 +519,11 @@
                         error("Conflicting Definitions for keyseq "*escape_string(newkey)*" within one keymap")
                     end
                 elseif done(newkey,i)
-                    current[c] = keymap[key]
+                    if isa(keymap[key],String)
+                        current[c] = normalize_key(keymap[key])
+                    else
+                        current[c] = keymap[key]
+                    end
                     break
                 else
                     current[c] = Dict{Char,Any}()
@@ -534,6 +538,26 @@
     keymap_gen_body(keymaps,body::Function,level) = keymap_gen_body(keymaps,:($(body)(s)))
     keymap_gen_body(keymaps,body::Char,level) = keymap_gen_body(keymaps,keymaps[body])
     keymap_gen_body(keymaps,body::Nothing,level) = nothing
+    function keymap_gen_body(keymaps,body::String,level)
+        if length(body) == 1
+            return keymap_gen_body(keymaps,body[1],level)
+        end
+        current = keymaps
+        for c in body
+            if haskey(current,c)
+                if isa(current[c],Dict)
+                    current = current[c]
+                else
+                    return keymap_gen_body(keymaps,current[c],level)
+                end
+            elseif haskey(current,'\0')
+                return keymap_gen_body(keymaps,current['\0'],level)
+            else
+                error("No match for redirected key $body")
+            end
+        end
+        error("No exact match for redirected key $body")
+    end
 
     keymap_gen_body(a,b) = keymap_gen_body(a,b,1)
     function keymap_gen_body(dict,subdict::Dict,level)
@@ -668,7 +692,13 @@
         "\e[3**" => nothing,
         "\e[4**" => nothing,
         "\e[5**" => nothing,
-        "\e[6**" => nothing
+        "\e[6**" => nothing,
+        "\e[1~" => "\e[H",
+        "\e[4~" => "\e[F",
+        "\e[7~" => "\e[H",
+        "\e[8~" => "\e[F",
+        "\eOH"  => "\e[H",
+        "\eOF"  => "\e[F",
     }
 
     function write_response_buffer(s::PromptState,data)
@@ -750,30 +780,41 @@
     mode(s::PromptState) = s.p
     mode(s::SearchState) = @assert false
 
+    function accept_result(s,p)
+        parent = state(s,p).parent
+        replace_line(state(s,parent),state(s,p).respose_buffer)
+        transition(s,parent)
+    end
+
     function setup_search_keymap(hp) 
         p = HistoryPrompt(hp)
         pkeymap = {
-            "^R" => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
-            "^S" => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
-            "\r" => (s)->begin
-                parent = state(s,p).parent
-                replace_line(state(s,parent),state(s,p).respose_buffer)
-                transition(s,parent)
+            "^R"    => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
+            "^S"    => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
+            "\r"    => (s)->begin
+                    
             end,
-            "\t" => nothing, #TODO: Maybe allow tab completion in R-Search?
+            "\t"    => nothing, #TODO: Maybe allow tab completion in R-Search?
 
             # Backspace/^H
-            '\b' => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(Readline.terminal(s))),
-            127 => '\b',
-            "^C" => s->transition(s,state(s,p).parent),
-            "^D" => s->transition(s,state(s,p).parent),
-            "*" => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
+            '\b'    => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(Readline.terminal(s))),
+            127     => '\b',
+            "^C"    => s->transition(s,state(s,p).parent),
+            "^D"    => s->transition(s,state(s,p).parent),
+            # ^A    
+            1       => s->(accept_result(s,p); move_line_start(s)),
+            # ^E
+            5       => s->(accept_result(s,p); move_line_end(s)),
+            # Try to catch all Home/End keys
+            "\e[H"  => s->(accept_result(s,p); move_input_start(s)),
+            "\e[F"  => s->(accept_result(s,p); move_input_end(s)),
+            "*"     => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
         }
         @eval @Readline.keymap keymap_func $([pkeymap, escape_defaults])
         p.keymap_func = keymap_func
         keymap = {
-            "^R" => s->( state(s,p).parent = mode(s); state(s,p).backward = true; transition(s,p) ),
-            "^S" => s->( state(s,p).parent = mode(s); state(s,p).backward = false; transition(s,p) ),
+            "^R"    => s->( state(s,p).parent = mode(s); state(s,p).backward = true; transition(s,p) ),
+            "^S"    => s->( state(s,p).parent = mode(s); state(s,p).backward = false; transition(s,p) ),
         }
         (p,keymap)
     end
@@ -864,6 +905,9 @@
         1 => move_line_start,
         # ^E
         5 => move_line_end,
+        # Try to catch all Home/End keys
+        "\e[H"  => move_input_start,
+        "\e[F"  => move_input_end,
         # ^L
         12 => :( Terminals.clear(Readline.terminal(s)); Readline.refresh_line(s) ),
         # ^W (#edit_delte_prev_word(s))
@@ -874,15 +918,6 @@
         "\e[C" => edit_move_right,
         # Left Arrow
         "\e[D" => edit_move_left,
-        # Try to catch all Home/End keys
-        "\e[1~" => move_input_start,
-        "\e[4~" => move_input_end,
-        "\e[7~" => move_input_start,
-        "\e[8~" => move_input_end,
-        "\eOH"  => move_input_start,
-        "\eOF"  => move_input_end,
-        "\e[H"  => move_input_start,
-        "\e[F"  => move_input_end
     }
 
     function history_keymap(hist) 
