@@ -933,7 +933,13 @@
         # ^W (#edit_delte_prev_word(s))
         23 => :( error("Unimplemented") ),
         # ^C
-        "^C" => :( print(Readline.terminal(s), "^C\n\n"); transition(s,:reset); Readline.refresh_line(s) ),
+        "^C" => s->begin 
+            move_input_end(s); 
+            Readline.refresh_line(s); 
+            print(Readline.terminal(s), "^C\n\n"); 
+            transition(s,:reset); 
+            Readline.refresh_line(s)
+        end,
         # Right Arrow
         "\e[C" => edit_move_right,
         # Left Arrow
@@ -988,6 +994,7 @@
             s.input_buffer.size = 0
             s.input_buffer.ptr = 1
         end
+        s.ias = InputAreaState(0,0)
     end
 
     function reset_state(s::MIState)
