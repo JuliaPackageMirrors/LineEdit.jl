@@ -1112,12 +1112,15 @@
         raw!(terminal,true)
         isa(terminal,UnixTerminal) && Terminals.Unix.enable_bracketed_paste(terminal)
         try
+            start_reading(terminal)
             activate(prompt,s)
             while true
                 state = keymap(s,prompt)(s,keymap_data(s,prompt))
                 if state == :abort
+                    stop_reading(terminal)
                     return (buffer(s),false)
                 elseif state == :done
+                    stop_reading(terminal)
                     return (buffer(s),true)
                 else
                     @assert state == :ok
