@@ -327,6 +327,52 @@
         end
     end
 
+    ## Move line up/down
+    # Querying the terminal is expensive, memory access is cheap
+    # so to find the current column, we find the offset for the start
+    # of the line.
+    function edit_move_up(s)
+        buf = buffer(s)
+        npos = rsearch(buf.data,'\n',position(buf))
+        if npos == 0 #we're in the first line
+            return false
+        end
+        # We're interested in character count, not byte count
+        offset = length(bytestring(buf.data[(npos+1):(position(buf))]))-1
+        npos2 = rsearch(buf.data,'\n',npos-1)
+        seek(buf,npos2+1)
+        for _ = 1:offset
+            pos = position(buf)
+            if read(buf,Char) == '\n'
+                seek(buf,pos)
+                break
+            end
+        end
+        refresh_line(s)
+        return true
+    end
+
+    function edit_move_down(s)
+        buf = buffer(s)
+        npos = rsearch(buf.data,'\n',position(buf))
+        # We're interested in character count, not byte count
+        offset = length(bytestring(buf.data[(npos+1):(position(buf))]))-1
+        npos2 = search(buf.data,'\n',position(buf)+1)
+        if npos2 == 0 #we're in the last line
+            return false
+        end
+        seek(buf,npos2+1)
+        for _ = 1:offset
+            pos = position(buf)
+            if eof(buf) || read(buf,Char) == '\n'
+                seek(buf,pos)
+                break
+            end
+        end
+        refresh_line(s)
+        return true
+    end
+
     function charlen(ch::Char)
         if ch < 0x80
             return 1
@@ -944,6 +990,10 @@
         "\e[C" => edit_move_right,
         # Left Arrow
         "\e[D" => edit_move_left,
+        # Up Arrow
+        "\e[A" => edit_move_up,
+        # Down Arrow
+        "\e[B" => edit_move_down,
         # Bracketed Paste Mode
         "\e[200~" => s->begin
             ps = state(s,mode(s))
@@ -964,9 +1014,9 @@
             # ^N
             14 => :( Readline.history_next(s,$hist) ),
             # Up Arrow
-            "\e[A" => :( Readline.history_prev(s,$hist) ),
+            "\e[A" => :( Readline.edit_move_up(s) || Readline.history_prev(s,$hist) ),
             # Down Arrow
-            "\e[B" => :( Readline.history_next(s,$hist) )
+            "\e[B" => :( Readline.edit_move_down(s) || Readline.history_next(s,$hist) )
         }
     end
 
