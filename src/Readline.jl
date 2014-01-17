@@ -477,7 +477,7 @@
 
 
     function history_prev(s,hist) 
-        (l,ok) = history_prev(mode(s).hist,s)
+        (l,ok) = history_prev(mode(s).hist)
         if ok
             replace_line(s,l)
             refresh_line(s)
@@ -486,7 +486,7 @@
         end
     end
     function history_next(s,hist) 
-        (l,ok) = history_next(mode(s).hist,s)
+        (l,ok) = history_next(mode(s).hist)
         if ok
             replace_line(s,l)
             refresh_line(s)
