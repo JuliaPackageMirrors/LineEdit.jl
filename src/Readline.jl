@@ -498,7 +498,7 @@
     refresh_line(s) = refreshMultiLine(s)
 
     default_completion_cb(::IOBuffer) = []
-    default_enter_cb(::IOBuffer) = true
+    default_enter_cb(_) = true
 
     write_prompt(terminal,s::PromptState) = write_prompt(terminal,s,s.p.prompt)
     function write_prompt(terminal,s::PromptState,prompt)
