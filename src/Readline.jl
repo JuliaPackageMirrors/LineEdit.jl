@@ -840,7 +840,7 @@
         pkeymap = {
             "^R"    => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
             "^S"    => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
-            "\r"    => s->accept_result(s),
+            "\r"    => s->accept_result(s,p),
             "\t"    => nothing, #TODO: Maybe allow tab completion in R-Search?
 
             # Backspace/^H
