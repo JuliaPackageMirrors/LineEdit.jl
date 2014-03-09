@@ -51,7 +51,7 @@
         indent::Int
     end
 
-    input_string(s::PromptState) = bytestring(pointer(s.input_buffer.data),s.input_buffer.ptr-1)
+    input_string(s::PromptState) = bytestring(pointer(s.input_buffer.data),s.input_buffer.size)
 
     abstract HistoryProvider
     abstract CompletionProvider
@@ -354,10 +354,10 @@
 
     function edit_move_down(s)
         buf = buffer(s)
-        npos = rsearch(buf.data,'\n',position(buf))
+        npos = rsearch(buf.data[1:buf.size],'\n',position(buf))
         # We're interested in character count, not byte count
         offset = length(bytestring(buf.data[(npos+1):(position(buf))]))-1
-        npos2 = search(buf.data,'\n',position(buf)+1)
+        npos2 = search(buf.data[1:buf.size],'\n',position(buf)+1)
         if npos2 == 0 #we're in the last line
             return false
         end
