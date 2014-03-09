@@ -909,6 +909,13 @@
         refresh_line(s)
     end
 
+    function commit_line(s)
+        println(Readline.terminal(s))
+        Readline.add_history(s)
+        Readline.state(s,Readline.mode(s)).ias = 
+            Readline.InputAreaState(0,0)
+    end
+
     const default_keymap =
     {   
         # Tab
@@ -933,10 +940,7 @@
         # Enter
         '\r' => quote
             if Readline.on_enter(s)
-                println(Readline.terminal(s))
-                Readline.add_history(s)
-                Readline.state(s,Readline.mode(s)).ias = 
-                    Readline.InputAreaState(0,0)
+                Readline.commit_line(s)
                 return :done
             else
                 Readline.edit_insert(s,'\n')
