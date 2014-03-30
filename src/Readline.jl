@@ -910,6 +910,7 @@
     end
 
     function commit_line(s)
+        Readline.move_input_end(s)
         println(Readline.terminal(s))
         Readline.add_history(s)
         Readline.state(s,Readline.mode(s)).ias = 
