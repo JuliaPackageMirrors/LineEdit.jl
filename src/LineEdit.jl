@@ -1,4 +1,4 @@
-    module Readline
+module LineEdit
     using Terminals
 
     import Terminals: raw!, width, height, cmove, Rect, Size, getX, 
@@ -97,7 +97,7 @@
     function completeLine(s::PromptState)
         (completions,partial) = completeLine(s.p.complete,s)
         if length(completions) == 0
-            beep(Readline.terminal(s))
+            beep(LineEdit.terminal(s))
         elseif length(completions) == 1
             # Replace word by completion
             prev_pos = position(s.input_buffer)
@@ -114,18 +114,18 @@
             else
                 # Show available completions
                 colmax = maximum(map(length,completions))
-                num_cols = div(width(Readline.terminal(s)),colmax+2)
+                num_cols = div(width(LineEdit.terminal(s)),colmax+2)
                 entries_per_col = div(length(completions),num_cols)+1
-                println(Readline.terminal(s))
+                println(LineEdit.terminal(s))
                 for row = 1:entries_per_col
                     for col = 0:num_cols
                         idx = row + col*entries_per_col
                         if idx <= length(completions)
-                            cmove_col(Readline.terminal(s),(colmax+2)*col)
-                            print(Readline.terminal(s),completions[idx])
+                            cmove_col(LineEdit.terminal(s),(colmax+2)*col)
+                            print(LineEdit.terminal(s),completions[idx])
                         end
                     end
-                    println(Readline.terminal(s))
+                    println(LineEdit.terminal(s))
                 end
             end
         end
@@ -400,9 +400,9 @@
         str = string(c)
         edit_insert(s.input_buffer,str)
         if !('\n' in str) && eof(s.input_buffer) && 
-            ((position(s.input_buffer) + length(s.p.prompt) + sizeof(str) - 1) < width(Readline.terminal(s)))
+            ((position(s.input_buffer) + length(s.p.prompt) + sizeof(str) - 1) < width(LineEdit.terminal(s)))
             #Avoid full update
-            write(Readline.terminal(s),str)
+            write(LineEdit.terminal(s),str)
         else
             refresh_line(s)
         end
@@ -427,7 +427,7 @@
         if edit_backspace(s.input_buffer)
             refresh_line(s) 
         else
-            beep(Readline.terminal(s))
+            beep(LineEdit.terminal(s))
         end
 
     end
@@ -455,7 +455,7 @@
             seek(buf,oldpos)
             refresh_line(s)
         else
-            beep(Readline.terminal(s))
+            beep(LineEdit.terminal(s))
         end
     end
 
@@ -482,7 +482,7 @@
             replace_line(s,l)
             refresh_line(s)
         else
-            beep(Readline.terminal(s))
+            beep(LineEdit.terminal(s))
         end
     end
     function history_next(s,hist) 
@@ -491,7 +491,7 @@
             replace_line(s,l)
             refresh_line(s)
         else
-            beep(Readline.terminal(s))
+            beep(LineEdit.terminal(s))
         end
     end
 
@@ -502,7 +502,7 @@
 
     write_prompt(terminal,s::PromptState) = write_prompt(terminal,s,s.p.prompt)
     function write_prompt(terminal,s::PromptState,prompt)
-        @assert terminal == Readline.terminal(s)
+        @assert terminal == LineEdit.terminal(s)
         write(terminal,s.p.prompt_color)
         write(terminal,prompt)
         write(terminal,Base.text_colors[:normal])
@@ -612,7 +612,7 @@
     function keymap_gen_body(dict,subdict::Dict,level)
         block = Expr(:block)
         bc = symbol("c"*string(level))
-        push!(block.args,:($bc=read(Readline.terminal(s),Char)))
+        push!(block.args,:($bc=read(LineEdit.terminal(s),Char)))
 
         if haskey(subdict,'\0')
             last_if = keymap_gen_body(dict,subdict['\0'],level+1)
@@ -776,13 +776,13 @@
     terminal(s::SearchState) = s.terminal
 
     function update_display_buffer(s::SearchState,data)
-        history_search(data.histprompt.hp,data.query_buffer,data.respose_buffer,data.backward,false) || beep(Readline.terminal(s))
+        history_search(data.histprompt.hp,data.query_buffer,data.respose_buffer,data.backward,false) || beep(LineEdit.terminal(s))
         refresh_line(s)
     end
 
     function history_next_result(s::MIState,data::SearchState)
         #truncate(data.query_buffer,s.input_buffer.size - data.respose_buffer.size)
-        history_search(data.histprompt.hp,data.query_buffer,data.respose_buffer,data.backward,true) || beep(Readline.terminal(s))
+        history_search(data.histprompt.hp,data.query_buffer,data.respose_buffer,data.backward,true) || beep(LineEdit.terminal(s))
         refresh_line(data)
     end
 
@@ -838,13 +838,13 @@
     function setup_search_keymap(hp) 
         p = HistoryPrompt(hp)
         pkeymap = {
-            "^R"    => :( Readline.history_set_backward(data,true); Readline.history_next_result(s,data) ),
-            "^S"    => :( Readline.history_set_backward(data,false); Readline.history_next_result(s,data) ),
+            "^R"    => :( LineEdit.history_set_backward(data,true); LineEdit.history_next_result(s,data) ),
+            "^S"    => :( LineEdit.history_set_backward(data,false); LineEdit.history_next_result(s,data) ),
             "\r"    => s->accept_result(s,p),
             "\t"    => nothing, #TODO: Maybe allow tab completion in R-Search?
 
             # Backspace/^H
-            '\b'    => :(Readline.edit_backspace(data.query_buffer)?Readline.update_display_buffer(s,data):beep(Readline.terminal(s))),
+            '\b'    => :(LineEdit.edit_backspace(data.query_buffer)?LineEdit.update_display_buffer(s,data):beep(LineEdit.terminal(s))),
             127     => '\b',
             "^C"    => s->transition(s,state(s,p).parent),
             "^D"    => s->transition(s,state(s,p).parent),
@@ -855,9 +855,9 @@
             # Try to catch all Home/End keys
             "\e[H"  => s->(accept_result(s,p); move_input_start(s)),
             "\e[F"  => s->(accept_result(s,p); move_input_end(s)),
-            "*"     => :(Readline.edit_insert(data.query_buffer,c1);Readline.update_display_buffer(s,data))
+            "*"     => :(LineEdit.edit_insert(data.query_buffer,c1);LineEdit.update_display_buffer(s,data))
         }
-        @eval @Readline.keymap keymap_func $([pkeymap, escape_defaults])
+        @eval @LineEdit.keymap keymap_func $([pkeymap, escape_defaults])
         p.keymap_func = keymap_func
         keymap = {
             "^R"    => s->( state(s,p).parent = mode(s); state(s,p).backward = true; transition(s,p) ),
@@ -910,11 +910,11 @@
     end
 
     function commit_line(s)
-        Readline.move_input_end(s)
-        println(Readline.terminal(s))
-        Readline.add_history(s)
-        Readline.state(s,Readline.mode(s)).ias = 
-            Readline.InputAreaState(0,0)
+        LineEdit.move_input_end(s)
+        println(LineEdit.terminal(s))
+        LineEdit.add_history(s)
+        LineEdit.state(s,LineEdit.mode(s)).ias = 
+            LineEdit.InputAreaState(0,0)
     end
 
     const default_keymap =
@@ -935,16 +935,16 @@
                 edit_insert(s," "^4)
                 return
             end
-            Readline.completeLine(s) 
-            Readline.refresh_line(s)
+            LineEdit.completeLine(s) 
+            LineEdit.refresh_line(s)
         end,
         # Enter
         '\r' => quote
-            if Readline.on_enter(s)
-                Readline.commit_line(s)
+            if LineEdit.on_enter(s)
+                LineEdit.commit_line(s)
                 return :done
             else
-                Readline.edit_insert(s,'\n')
+                LineEdit.edit_insert(s,'\n')
             end
         end,
         '\n' => '\r',
@@ -953,10 +953,10 @@
         127 => '\b',
         # ^D
         4 => quote 
-            if Readline.buffer(s).size > 0
-                Readline.edit_delete(s)
+            if LineEdit.buffer(s).size > 0
+                LineEdit.edit_delete(s)
             else
-                println(Readline.terminal(s))
+                println(LineEdit.terminal(s))
                 return :abort
             end
         end,
@@ -965,13 +965,13 @@
         # ^F
         6 => edit_move_right,
         # Meta Enter
-        "\e\r" => :(Readline.edit_insert(s,'\n')),
+        "\e\r" => :(LineEdit.edit_insert(s,'\n')),
         # Simply insert it into the buffer by default
-        "*" => :( Readline.edit_insert(s,c1) ),
+        "*" => :( LineEdit.edit_insert(s,c1) ),
         # ^U
-        21 => :( truncate(Readline.buffer(s),0); Readline.refresh_line(s) ),
+        21 => :( truncate(LineEdit.buffer(s),0); LineEdit.refresh_line(s) ),
         # ^K
-        11 => :( truncate(Readline.buffer(s),position(Readline.buffer(s))); Readline.refresh_line(s) ),
+        11 => :( truncate(LineEdit.buffer(s),position(LineEdit.buffer(s))); LineEdit.refresh_line(s) ),
         # ^A    
         1 => move_line_start,
         # ^E
@@ -980,16 +980,16 @@
         "\e[H"  => move_input_start,
         "\e[F"  => move_input_end,
         # ^L
-        12 => :( Terminals.clear(Readline.terminal(s)); Readline.refresh_line(s) ),
+        12 => :( Terminals.clear(LineEdit.terminal(s)); LineEdit.refresh_line(s) ),
         # ^W (#edit_delte_prev_word(s))
         23 => :( error("Unimplemented") ),
         # ^C
         "^C" => s->begin 
             move_input_end(s); 
-            Readline.refresh_line(s); 
-            print(Readline.terminal(s), "^C\n\n"); 
+            LineEdit.refresh_line(s); 
+            print(LineEdit.terminal(s), "^C\n\n"); 
             transition(s,:reset); 
-            Readline.refresh_line(s)
+            LineEdit.refresh_line(s)
         end,
         # Right Arrow
         "\e[C" => edit_move_right,
@@ -1015,13 +1015,13 @@
     function history_keymap(hist) 
         return {
             # ^P
-            16 => :( Readline.history_prev(s,$hist) ),
+            16 => :( LineEdit.history_prev(s,$hist) ),
             # ^N
-            14 => :( Readline.history_next(s,$hist) ),
+            14 => :( LineEdit.history_next(s,$hist) ),
             # Up Arrow
-            "\e[A" => :( Readline.edit_move_up(s) || Readline.history_prev(s,$hist) ),
+            "\e[A" => :( LineEdit.edit_move_up(s) || LineEdit.history_prev(s,$hist) ),
             # Down Arrow
-            "\e[B" => :( Readline.edit_move_down(s) || Readline.history_next(s,$hist) )
+            "\e[B" => :( LineEdit.edit_move_down(s) || LineEdit.history_next(s,$hist) )
         }
     end
 
@@ -1069,7 +1069,7 @@
         end
     end
 
-    @Readline.keymap default_keymap_func [Readline.default_keymap,Readline.escape_defaults]
+    @LineEdit.keymap default_keymap_func [LineEdit.default_keymap,LineEdit.escape_defaults]
 
     function Prompt(prompt;
         first_prompt = prompt,
