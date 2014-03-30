@@ -281,7 +281,7 @@
 
     function edit_move_left(s::PromptState)
         if position(s.input_buffer)>0
-            #move t=o the next UTF8 character to the left
+            #move to the next UTF8 character to the left
             char_move_left(s.input_buffer)
             refresh_line(s)
         end
@@ -389,7 +389,7 @@
 
     function edit_replace(s,from,to,str)
         room = length(str.data)-(to-from)
-        ensureroom(s.input_buffer,s.input_buffer.size-to+room)
+        ensureroom(s.input_buffer,s.input_buffer.size + room)
         ccall(:memmove, Void, (Ptr{Void},Ptr{Void},Int), pointer(s.input_buffer.data,to+room+1),pointer(s.input_buffer.data,to+1),s.input_buffer.size-to)
         s.input_buffer.size += room
         seek(s.input_buffer,from)
